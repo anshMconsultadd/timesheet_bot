@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text
 from datetime import datetime
 from app.database import Base
+from app.utils.timezone import get_ist_now
 
 
 class TimesheetEntry(Base):
@@ -13,8 +14,8 @@ class TimesheetEntry(Base):
     client_name = Column(String(200), nullable=False)
     hours = Column(Float, nullable=False)
     timesheet_type = Column(String(20), nullable=False, default='weekly', index=True)  # 'weekly' or 'monthly'
-    submission_date = Column(DateTime, default=datetime.utcnow, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    submission_date = Column(DateTime, default=lambda: get_ist_now().replace(tzinfo=None), index=True)
+    created_at = Column(DateTime, default=lambda: get_ist_now().replace(tzinfo=None))
     
     def __repr__(self):
         return f"<TimesheetEntry(user={self.username}, client={self.client_name}, hours={self.hours}, type={self.timesheet_type})>"
