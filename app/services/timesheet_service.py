@@ -1,8 +1,9 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func, extract
+from sqlalchemy import func, extract, desc
 from app.models.timesheet import TimesheetEntry
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from app.utils.timezone import get_ist_now, utc_to_ist, format_ist_date, get_ist_date
 
 
 class TimesheetService:
@@ -139,6 +140,75 @@ class TimesheetService:
         
         return grouped
     
+    @staticmethod
+    def get_latest_timesheet_entries(db: Session, user_id: str) -> List[TimesheetEntry]:
+        """
+        Get all entries from the user's most recent timesheet submission.
+        Groups entries by submission date (YYYY-MM-DD) in IST and timesheet type.
+        """
+        from sqlalchemy import func, cast, Date
+
+        # Get the latest entry
+        latest_entry = db.query(TimesheetEntry).filter(
+            TimesheetEntry.user_id == user_id
+        ).order_by(desc(TimesheetEntry.submission_date)).first()
+
+        if not latest_entry:
+            return []
+
+        # Get the IST date of the latest entry
+        latest_ist_date = get_ist_date(latest_entry.submission_date)
+
+        # Get all entries submitted on the same IST date with the same type
+        entries = db.query(TimesheetEntry).filter(
+            TimesheetEntry.user_id == user_id,
+            TimesheetEntry.timesheet_type == latest_entry.timesheet_type
+        ).order_by(TimesheetEntry.submission_date).all()
+
+        # Filter entries by IST date
+        return [
+            entry for entry in entries 
+            if get_ist_date(entry.submission_date) == latest_ist_date
+        ]
+
+    @staticmethod
+    def update_timesheet_entry(
+        db: Session,
+        entry_id: int,
+        user_id: str,
+        client_name: str,
+        hours: float,
+        channel_id: str = None
+    ) -> Optional[TimesheetEntry]:
+        """Update a timesheet entry with optimistic locking for concurrency."""
+        entry = db.query(TimesheetEntry).filter(
+            TimesheetEntry.id == entry_id,
+            TimesheetEntry.user_id == user_id  # Ensure user owns this entry
+        ).first()
+        
+        if not entry:
+            return None
+        
+        try:
+            entry.client_name = client_name
+            entry.hours = hours
+            entry.submission_date = get_ist_now().replace(tzinfo=None)  # Update submission time in IST
+            if channel_id:  # Update channel_id if provided
+                entry.channel_id = channel_id
+            db.commit()
+            db.refresh(entry)
+            return entry
+        except Exception:
+            db.rollback()
+            return None
+
+    @staticmethod
+    def format_entry_date(entries: List[TimesheetEntry]) -> str:
+        """Format the submission date of entries for display in IST."""
+        if not entries:
+            return ""
+        return format_ist_date(entries[0].submission_date)
+
     @staticmethod
     def get_all_channels(db: Session) -> List[str]:
         """
