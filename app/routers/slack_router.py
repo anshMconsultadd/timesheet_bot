@@ -195,3 +195,34 @@ async def handle_monthly_report(request: Request, db: Session = Depends(get_db))
     response = await handler.handle_monthly_report(payload)
     
     return JSONResponse(content=response)
+
+@router.post("/commands/edit_timesheet")
+async def handle_edit_timesheet(request: Request, db: Session = Depends(get_db)):
+    """Handle the /edit_timesheet command."""
+    body = await request.body()
+    
+    if not verify_slack_signature(request, body):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+    
+    form_data = await request.form()
+    trigger_id = form_data.get("trigger_id")
+    
+    if not trigger_id:
+        return JSONResponse(content={
+            "response_type": "ephemeral",
+            "text": "Error: Unable to process command. Please try again."
+        })
+    
+    logger.info(f"Edit timesheet command received with trigger_id: {trigger_id}")
+    
+    payload = {
+        "user_id": form_data.get("user_id"),
+        "channel_id": form_data.get("channel_id"),
+        "trigger_id": trigger_id,
+        "text": form_data.get("text", "")
+    }
+    
+    handler = CommandHandler(db)
+    response = await handler.handle_edit_timesheet_command(payload)
+    
+    return JSONResponse(content=response)
