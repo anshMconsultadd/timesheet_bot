@@ -8,6 +8,25 @@ from app.utils.timezone import get_ist_now, utc_to_ist, format_ist_date, get_ist
 
 class TimesheetService:
     @staticmethod
+    def has_submitted_today(
+        db: Session,
+        user_id: str,
+        timesheet_type: str
+    ) -> bool:
+        """Check if user has already submitted a timesheet of this type today."""
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = today_start + timedelta(days=1)
+        
+        existing_entry = db.query(TimesheetEntry).filter(
+            TimesheetEntry.user_id == user_id,
+            TimesheetEntry.timesheet_type == timesheet_type,
+            TimesheetEntry.submission_date >= today_start,
+            TimesheetEntry.submission_date < today_end
+        ).first()
+        
+        return existing_entry is not None
+
+    @staticmethod
     def create_entry(
         db: Session,
         user_id: str,
@@ -71,12 +90,18 @@ class TimesheetService:
         ]
     
     @staticmethod
-    def get_user_entries(db: Session, user_id: str, days: int = 7) -> List[TimesheetEntry]:
+    def get_user_entries(db: Session, user_id: str, days: int = 7, timesheet_type: str = None) -> List[TimesheetEntry]:
         cutoff_date = datetime.now() - timedelta(days=days)
-        return db.query(TimesheetEntry).filter(
+        query = db.query(TimesheetEntry).filter(
             TimesheetEntry.user_id == user_id,
             TimesheetEntry.submission_date >= cutoff_date
-        ).all()
+        )
+        
+        # Add timesheet_type filter if specified
+        if timesheet_type:
+            query = query.filter(TimesheetEntry.timesheet_type == timesheet_type)
+            
+        return query.all()
 
     @staticmethod
     def get_weekly_entries_grouped_by_user(db: Session) -> Dict[str, Dict[str, Any]]:
@@ -181,13 +206,22 @@ class TimesheetService:
         channel_id: str = None
     ) -> Optional[TimesheetEntry]:
         """Update a timesheet entry with optimistic locking for concurrency."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"🔄 Attempting to update entry {entry_id} for user {user_id}")
+        
         entry = db.query(TimesheetEntry).filter(
             TimesheetEntry.id == entry_id,
             TimesheetEntry.user_id == user_id  # Ensure user owns this entry
         ).first()
         
         if not entry:
+            logger.error(f"❌ Entry {entry_id} not found for user {user_id}")
             return None
+        
+        logger.info(f"📍 Found entry: {entry.client_name} - {entry.hours} hours")
+        logger.info(f"📍 Updating to: {client_name} - {hours} hours")
         
         try:
             entry.client_name = client_name
@@ -197,10 +231,45 @@ class TimesheetService:
                 entry.channel_id = channel_id
             db.commit()
             db.refresh(entry)
+            logger.info(f"✅ Successfully updated entry {entry_id}")
             return entry
-        except Exception:
+        except Exception as e:
+            logger.error(f"❌ Error updating entry {entry_id}: {str(e)}")
             db.rollback()
             return None
+
+    @staticmethod
+    def delete_timesheet_entry(
+        db: Session,
+        entry_id: int,
+        user_id: str
+    ) -> bool:
+        """Delete a timesheet entry. Only the owner can delete their entry."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"🗑️ Attempting to delete entry {entry_id} for user {user_id}")
+        
+        entry = db.query(TimesheetEntry).filter(
+            TimesheetEntry.id == entry_id,
+            TimesheetEntry.user_id == user_id  # Ensure user owns this entry
+        ).first()
+        
+        if not entry:
+            logger.error(f"❌ Entry {entry_id} not found for user {user_id}")
+            return False
+        
+        logger.info(f"📍 Found entry to delete: {entry.client_name} - {entry.hours} hours")
+        
+        try:
+            db.delete(entry)
+            db.commit()
+            logger.info(f"✅ Successfully deleted entry {entry_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error deleting entry {entry_id}: {str(e)}")
+            db.rollback()
+            return False
 
     @staticmethod
     def format_entry_date(entries: List[TimesheetEntry]) -> str:

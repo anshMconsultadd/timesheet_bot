@@ -63,8 +63,10 @@ class InteractionHandler:
             view = payload.get('view', {})
             view_id = view.get('id')
             callback_id = view.get('callback_id', 'timesheet_modal')
+            private_metadata = view.get('private_metadata', '{}')
             logger.info(f"🪟 View ID: {view_id}")
             logger.info(f"🎫 Callback ID: {callback_id}")
+            logger.info(f"📍 Private metadata to preserve: {private_metadata}")
             
             if not view_id:
                 raise ValueError("No view ID found in payload")
@@ -74,13 +76,14 @@ class InteractionHandler:
             new_blocks = self.block_builder.build_entry_forms(num_entries)
             logger.info(f"📦 Generated {len(new_blocks)} blocks")
             
-            # Try updating view
+            # Try updating view with preserved metadata
             logger.info("🔄 Attempting to update view...")
             success = self.slack_service.update_modal_view(
                 view_id=view_id,
                 blocks=new_blocks,
                 title="Weekly Timesheet",
-                callback_id=callback_id
+                callback_id=callback_id,
+                private_metadata=private_metadata
             )
             
             if not success:
@@ -116,7 +119,37 @@ class InteractionHandler:
             user_name = self.slack_service.get_user_display_name(user_id)
             logger.info(f"Processing submission for user: {user_id} ({user_name})")
             
-            channel_id = payload.get('channel', {}).get('id', 'unknown')
+            # Try to get channel_id from multiple sources with detailed logging
+            channel_id = payload.get('channel', {}).get('id')
+            logger.info(f"📍 Channel ID from payload['channel']: {channel_id}")
+            
+            if not channel_id:
+                logger.warning("⚠️ Channel ID not in payload['channel'], checking view metadata...")
+                view = payload.get('view', {})
+                try:
+                    private_metadata = view.get('private_metadata', '{}')
+                    logger.info(f"📍 Raw private_metadata in _handle_submit: {private_metadata}")
+                    
+                    if private_metadata and private_metadata != '{}':
+                        metadata = json.loads(private_metadata)
+                        channel_id = metadata.get('channel_id')
+                        logger.info(f"📍 Channel ID from metadata in _handle_submit: {channel_id}")
+                        if channel_id:
+                            logger.info(f"✅ Got channel_id from view metadata: {channel_id}")
+                    else:
+                        logger.warning("⚠️ No private_metadata in view")
+                except Exception as e:
+                    logger.error(f"❌ Error parsing metadata in _handle_submit: {str(e)}")
+            
+            if not channel_id:
+                logger.error("❌ CRITICAL: Could not find channel_id anywhere in _handle_submit!")
+                logger.error(f"❌ Payload keys: {list(payload.keys())}")
+                if 'view' in payload:
+                    logger.error(f"❌ View keys: {list(payload['view'].keys())}")
+                channel_id = 'unknown'
+            else:
+                logger.info(f"✅ Final channel_id for submission: {channel_id}")
+            
             view = payload.get('view', {})
             state_values = view.get('state', {}).get('values', {})
             message_ts = payload.get('message', {}).get('ts')
@@ -223,14 +256,20 @@ class InteractionHandler:
             user_name = self.slack_service.get_user_display_name(user_id)
             view = payload['view']
             
+            logger.info(f"🔧 Edit timesheet submission for user: {user_id}")
+            
             # Get metadata containing entry_ids and timesheet_type
             try:
                 metadata = json.loads(view.get('private_metadata', '{}'))
                 entry_ids = metadata.get('entry_ids')
                 channel_id = metadata.get('channel_id', 'unknown')
+                logger.info(f"📍 Metadata: {metadata}")
+                logger.info(f"📍 Entry IDs to update: {entry_ids}")
+                logger.info(f"📍 Channel ID: {channel_id}")
                 if not entry_ids:
                     raise ValueError("No entry IDs found in metadata")
             except (json.JSONDecodeError, ValueError) as e:
+                logger.error(f"❌ Metadata error: {str(e)}")
                 return {
                     "response_action": "errors",
                     "errors": {"entry_count_block": f"Invalid metadata: {str(e)}"}
@@ -239,14 +278,36 @@ class InteractionHandler:
             # Get values from form for all entries
             values = view['state']['values']
             updates = []
+            new_entries = []
             errors = {}
             
-            for i, entry_id in enumerate(entry_ids):
+            # Count how many form entries we have
+            form_entry_count = 0
+            for i in range(20):  # Check up to 20 entries
+                if f'client_block_{i}' in values:
+                    form_entry_count = i + 1
+                else:
+                    break
+            
+            logger.info(f"📊 Form has {form_entry_count} entries, existing entries: {len(entry_ids)}")
+            
+            # Determine which entries to delete (if form has fewer entries than existing)
+            entries_to_delete = []
+            if form_entry_count < len(entry_ids):
+                entries_to_delete = entry_ids[form_entry_count:]  # Entries beyond form count
+                logger.info(f"🗑️ Will delete {len(entries_to_delete)} entries: {entries_to_delete}")
+            
+            # Process all form entries
+            for i in range(form_entry_count):
                 client_block = values.get(f'client_block_{i}', {})
                 hours_block = values.get(f'hours_block_{i}', {})
                 
                 client_name = client_block.get(f'client_input_{i}', {}).get('value', '').strip()
                 hours_value = hours_block.get(f'hours_input_{i}', {}).get('value', '').strip()
+                
+                # Skip empty entries
+                if not client_name and not hours_value:
+                    continue
                 
                 if not client_name:
                     errors[f'client_block_{i}'] = "Client name is required"
@@ -262,11 +323,19 @@ class InteractionHandler:
                     errors[f'hours_block_{i}'] = "Hours must be a valid number"
                     continue
                 
-                updates.append({
-                    'entry_id': entry_id,
-                    'client_name': client_name,
-                    'hours': hours
-                })
+                # If this is an existing entry, add to updates
+                if i < len(entry_ids):
+                    updates.append({
+                        'entry_id': entry_ids[i],
+                        'client_name': client_name,
+                        'hours': hours
+                    })
+                else:
+                    # This is a new entry, add to new_entries
+                    new_entries.append({
+                        'client_name': client_name,
+                        'hours': hours
+                    })
             
             if errors:
                 return {
@@ -274,9 +343,11 @@ class InteractionHandler:
                     "errors": errors
                 }
             
-            # Update all timesheet entries
+            # Update existing timesheet entries
             successful_updates = []
+            logger.info(f"🔄 Attempting to update {len(updates)} existing entries")
             for update in updates:
+                logger.info(f"🔄 Updating entry {update['entry_id']}: {update['client_name']} - {update['hours']} hours")
                 updated_entry = TimesheetService.update_timesheet_entry(
                     db=self.db,
                     entry_id=update['entry_id'],
@@ -286,18 +357,63 @@ class InteractionHandler:
                     channel_id=channel_id  # Include channel_id in update
                 )
                 if updated_entry:
+                    logger.info(f"✅ Successfully updated entry {update['entry_id']}")
                     successful_updates.append(update)
+                else:
+                    logger.error(f"❌ Failed to update entry {update['entry_id']}")
             
-            if not successful_updates:
+            # Create new timesheet entries
+            successful_new_entries = []
+            logger.info(f"🆕 Attempting to create {len(new_entries)} new entries")
+            for new_entry in new_entries:
+                logger.info(f"🆕 Creating new entry: {new_entry['client_name']} - {new_entry['hours']} hours")
+                created_entry = TimesheetService.create_entry(
+                    db=self.db,
+                    user_id=user_id,
+                    username=user_name,
+                    channel_id=channel_id,
+                    client_name=new_entry['client_name'],
+                    hours=new_entry['hours'],
+                    timesheet_type=metadata.get('timesheet_type', 'weekly')
+                )
+                if created_entry:
+                    logger.info(f"✅ Successfully created new entry {created_entry.id}")
+                    successful_new_entries.append(new_entry)
+                else:
+                    logger.error(f"❌ Failed to create new entry")
+            
+            # Delete entries that are no longer needed (when reducing entry count)
+            successful_deletions = []
+            logger.info(f"🗑️ Attempting to delete {len(entries_to_delete)} entries")
+            for entry_id in entries_to_delete:
+                logger.info(f"🗑️ Deleting entry {entry_id}")
+                deleted = TimesheetService.delete_timesheet_entry(
+                    db=self.db,
+                    entry_id=entry_id,
+                    user_id=user_id
+                )
+                if deleted:
+                    logger.info(f"✅ Successfully deleted entry {entry_id}")
+                    successful_deletions.append(entry_id)
+                else:
+                    logger.error(f"❌ Failed to delete entry {entry_id}")
+            
+            logger.info(f"📊 Successfully updated {len(successful_updates)} entries, created {len(successful_new_entries)} new entries, and deleted {len(successful_deletions)} entries")
+            
+            if not successful_updates and not successful_new_entries and not successful_deletions:
                 return {
                     "response_action": "errors",
                     "errors": {"client_block_0": "Failed to update timesheet. The entries may have been modified by someone else."}
                 }
             
-            # Send DM confirmation with all updated entries
+            # Send DM confirmation with all updated, new, and deleted entries
             update_text = "✅ Your timesheet has been updated:\n"
             for update in successful_updates:
-                update_text += f"• {update['client_name']}: {update['hours']} hours\n"
+                update_text += f"• {update['client_name']}: {update['hours']} hours (updated)\n"
+            for new_entry in successful_new_entries:
+                update_text += f"• {new_entry['client_name']}: {new_entry['hours']} hours (new)\n"
+            if successful_deletions:
+                update_text += f"\n🗑️ Removed {len(successful_deletions)} entries\n"
             
             self.slack_service.send_dm(
                 user_id,
@@ -328,28 +444,68 @@ class InteractionHandler:
             view = payload.get('view', {})
             state_values = view.get('state', {}).get('values', {})
             
-            # Get channel_id from metadata, fallback to unknown
+            # Log the full view structure for debugging
+            logger.info(f"📍 Full view object keys: {list(view.keys())}")
+            logger.info(f"📍 View callback_id: {view.get('callback_id')}")
+            logger.info(f"📍 View id: {view.get('id')}")
+            
+            # Get channel_id from metadata with detailed logging
+            channel_id = 'unknown'  # Default fallback
+            
             try:
-                metadata = json.loads(view.get('private_metadata', '{}'))
-                # Try to get channel_id from metadata first
-                channel_id = metadata.get('channel_id')
+                private_metadata = view.get('private_metadata', '{}')
+                logger.info(f"📍 Raw private_metadata: '{private_metadata}'")
+                logger.info(f"📍 Private metadata type: {type(private_metadata)}")
+                logger.info(f"📍 Private metadata length: {len(private_metadata) if private_metadata else 0}")
                 
-                # If not in metadata, try to get from payload
-                if not channel_id:
-                    channel_id = (
-                        payload.get('channel', {}).get('id') or  # Try channel object
-                        payload.get('channel_id') or  # Try direct channel_id
-                        metadata.get('channel_id', 'unknown')  # Fallback to metadata
-                    )
+                if private_metadata and private_metadata.strip() and private_metadata != '{}':
+                    metadata = json.loads(private_metadata)
+                    logger.info(f"📍 Parsed metadata: {metadata}")
                     
-                logger.info(f"Retrieved channel_id: {channel_id}")
+                    # Try to get channel_id from metadata first
+                    channel_id = metadata.get('channel_id')
+                    logger.info(f"📍 Channel ID from metadata: {channel_id}")
+                    
+                    if channel_id:
+                        logger.info(f"✅ Successfully retrieved channel_id from metadata: {channel_id}")
+                    else:
+                        logger.warning("⚠️ Channel ID not found in metadata")
+                else:
+                    logger.warning("⚠️ No private_metadata found in view")
+                
+                # If still no channel_id, try to get from payload
+                if not channel_id or channel_id == 'unknown':
+                    logger.warning("⚠️ Channel ID not in metadata, checking payload...")
+                    payload_channel_id = (
+                        payload.get('channel', {}).get('id') or  # Try channel object
+                        payload.get('channel_id')  # Try direct channel_id
+                    )
+                    if payload_channel_id:
+                        channel_id = payload_channel_id
+                        logger.info(f"📍 Retrieved channel_id from payload: {channel_id}")
+                    else:
+                        logger.error("❌ No channel_id found in payload either!")
+                
+                if channel_id == 'unknown':
+                    logger.error("❌ CRITICAL: Channel ID is UNKNOWN! This will break reminders!")
+                    logger.error(f"❌ Full payload keys: {list(payload.keys())}")
+                    logger.error(f"❌ View keys: {list(view.keys())}")
+                else:
+                    logger.info(f"✅ Final channel_id for submission: {channel_id}")
+                    
             except (json.JSONDecodeError, ValueError) as e:
-                logger.error(f"Error parsing metadata: {str(e)}")
-                # Try to get channel_id from payload as fallback
-                channel_id = (
+                logger.error(f"❌ Error parsing metadata: {str(e)}")
+                logger.error(f"❌ Raw metadata was: {view.get('private_metadata', 'None')}")
+                # Try to get channel_id from payload as final fallback
+                payload_channel_id = (
                     payload.get('channel', {}).get('id') or
-                    payload.get('channel_id', 'unknown')
+                    payload.get('channel_id')
                 )
+                if payload_channel_id:
+                    channel_id = payload_channel_id
+                    logger.warning(f"⚠️ Using fallback channel_id from payload: {channel_id}")
+                else:
+                    logger.error("❌ CRITICAL: No channel_id available anywhere!")
             
             # Determine timesheet type from callback_id
             callback_id = payload.get('view', {}).get('callback_id', 'submit_timesheet')
@@ -357,6 +513,16 @@ class InteractionHandler:
                 timesheet_type = 'monthly'
             else:
                 timesheet_type = 'weekly'  # Default to weekly for 'submit_weekly_timesheet' or 'submit_timesheet'
+
+            # Check if user has already submitted this timesheet type today
+            if TimesheetService.has_submitted_today(self.db, user_id, timesheet_type):
+                logger.warning(f"User {user_id} attempted duplicate {timesheet_type} submission")
+                return {
+                    "response_action": "errors",
+                    "errors": {
+                        "client_block_0": f"You have already submitted a {timesheet_type} timesheet today. Use /edit_timesheet to modify your existing entries."
+                    }
+                }
 
             entries = []
             skipped_entries = []

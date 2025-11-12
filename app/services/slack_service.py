@@ -127,18 +127,23 @@ class SlackService:
             # Add private_metadata if provided
             if private_metadata:
                 view["private_metadata"] = private_metadata
-                logger.info(f"Added private_metadata: {private_metadata}")
+                logger.info(f"✅ Added private_metadata to view: {private_metadata}")
+            else:
+                logger.warning("⚠️ No private_metadata provided to open_modal")
 
+            logger.info(f"📤 Sending view to Slack: {json.dumps(view, indent=2)}")
+            
             response = self.client.views_open(
                 trigger_id=trigger_id,
                 view=view
             )
             
             if not response["ok"]:
-                logger.error(f"Error in views.open response: {response}")
+                logger.error(f"❌ Error in views.open response: {response}")
                 return False
                 
-            logger.info("Modal opened successfully")
+            logger.info("✅ Modal opened successfully")
+            logger.info(f"📨 Slack response: {response.get('view', {}).get('id', 'No view ID')}")
             return True
             
         except ValueError as ve:
@@ -186,7 +191,7 @@ class SlackService:
             return stored_username
         return self.format_user_mention(user_id)
 
-    def update_modal_view(self, view_id: str, blocks: List[Dict[str, Any]], title: str = "Weekly Timesheet", callback_id: str = "timesheet_modal") -> bool:
+    def update_modal_view(self, view_id: str, blocks: List[Dict[str, Any]], title: str = "Weekly Timesheet", callback_id: str = "timesheet_modal", private_metadata: str = None) -> bool:
         """Update an existing modal view"""
         try:
             logger.info(f"🔄 Updating modal view {view_id}")
@@ -201,6 +206,13 @@ class SlackService:
                 "close": {"type": "plain_text", "text": "Cancel"},
                 "blocks": blocks
             }
+            
+            # Add private_metadata if provided to preserve it during update
+            if private_metadata:
+                view_payload["private_metadata"] = private_metadata
+                logger.info(f"✅ Preserving private_metadata in view update: {private_metadata}")
+            else:
+                logger.warning("⚠️ No private_metadata provided to update_modal_view")
             
             logger.info("📤 Sending update to Slack...")
             response = self.client.views_update(

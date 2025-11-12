@@ -49,19 +49,26 @@ class CommandHandler:
     async def handle_timesheet_weekly_command(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         trigger_id = payload.get("trigger_id")
         channel_id = payload.get("channel_id")
+        
+        logger.info(f"📍 Weekly command - trigger_id: {trigger_id}")
+        logger.info(f"📍 Weekly command - channel_id: {channel_id}")
+        
         blocks = self.block_builder.build_weekly_form()
 
         # Store channel_id in metadata
         metadata = json.dumps({"channel_id": channel_id})
+        logger.info(f"📍 Weekly command - metadata to store: {metadata}")
 
         # Open modal with the weekly form - use specific callback_id and include metadata
-        self.slack_service.open_modal(
+        success = self.slack_service.open_modal(
             trigger_id=trigger_id,
             blocks=blocks,
             title="Weekly Timesheet",
             callback_id="submit_weekly_timesheet",
             private_metadata=metadata
         )
+        
+        logger.info(f"📍 Weekly command - modal open success: {success}")
 
         # Return success message instead of None
         return {
@@ -72,19 +79,26 @@ class CommandHandler:
     async def handle_timesheet_monthly_command(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         trigger_id = payload.get("trigger_id")
         channel_id = payload.get("channel_id")
+        
+        logger.info(f"📍 Monthly command - trigger_id: {trigger_id}")
+        logger.info(f"📍 Monthly command - channel_id: {channel_id}")
+        
         blocks = self.block_builder.build_monthly_form()
 
         # Store channel_id in metadata
         metadata = json.dumps({"channel_id": channel_id})
+        logger.info(f"📍 Monthly command - metadata to store: {metadata}")
 
         # Open modal with the monthly form - use specific callback_id and include metadata
-        self.slack_service.open_modal(
+        success = self.slack_service.open_modal(
             trigger_id=trigger_id,
             blocks=blocks,
             title="Monthly Timesheet",
             callback_id="submit_monthly_timesheet",
             private_metadata=metadata
         )
+        
+        logger.info(f"📍 Monthly command - modal open success: {success}")
 
         # Return success message instead of None
         return {
@@ -93,94 +107,90 @@ class CommandHandler:
         }
 
     async def handle_weekly_report(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        user_id = payload.get('user_id')
+        try:
+            user_id = payload.get('user_id')
 
-        # Manager(s) list from env (comma-separated supported)
-        manager_ids = [m.strip() for m in (settings.slack_manager_user_id or "").split(',') if m.strip()]
+            # Manager(s) list from env (comma-separated supported)
+            manager_ids = [m.strip() for m in (settings.slack_manager_user_id or "").split(',') if m.strip()]
 
-        # If caller is manager, show full grouped report
-        if user_id in manager_ids:
-            grouped_entries = TimesheetService.get_weekly_entries_grouped_by_user(self.db)
-            channel_ids = TimesheetService.get_all_channels(self.db)
-            all_user_ids = set(self.slack_service.get_all_users_from_channels(channel_ids))
-            submitted_user_ids = set(grouped_entries.keys())
-            missing_user_ids = list(all_user_ids - submitted_user_ids)
+            # If caller is manager, generate full report with missing users
+            if user_id in manager_ids:
+                # Schedule background job to generate full report with missing users
+                self._schedule_full_weekly_report(user_id)
+                
+                return {
+                    "response_type": "ephemeral",
+                    "text": "📊 Generating detailed weekly report with missing users... You'll receive it via DM shortly."
+                }
 
-            blocks = self.block_builder.build_user_grouped_report_blocks(
-                grouped_entries,
-                "📊 Weekly Timesheet Report",
-                missing_user_ids
-            )
+            # Non-manager: show only the caller's weekly entries for last 7 days
+            entries = TimesheetService.get_user_entries(self.db, user_id, days=7, timesheet_type='weekly')
+            entry_dicts = [
+                {
+                    'username': e.username,
+                    'client_name': e.client_name,
+                    'hours': e.hours,
+                    'submission_date': e.submission_date.strftime('%Y-%m-%d %H:%M')
+                }
+                for e in entries
+            ]
 
+            blocks = self.block_builder.build_report_blocks(entry_dicts, "📊 Your Weekly Timesheet Report")
             return {
                 "response_type": "ephemeral",
                 "blocks": blocks,
-                "text": "Weekly Report"
+                "text": "Your Weekly Report"
             }
-
-        # Non-manager: show only the caller's entries for last 7 days
-        entries = TimesheetService.get_user_entries(self.db, user_id, days=7)
-        entry_dicts = [
-            {
-                'username': e.username,
-                'client_name': e.client_name,
-                'hours': e.hours,
-                'submission_date': e.submission_date.strftime('%Y-%m-%d %H:%M')
+        
+        except Exception as e:
+            logger.error(f"Error in handle_weekly_report: {str(e)}")
+            return {
+                "response_type": "ephemeral",
+                "text": f"Error generating weekly report: {str(e)}"
             }
-            for e in entries
-        ]
-
-        blocks = self.block_builder.build_report_blocks(entry_dicts, "📊 Your Weekly Timesheet Report")
-        return {
-            "response_type": "ephemeral",
-            "blocks": blocks,
-            "text": "Your Weekly Report"
-        }
     
     async def handle_monthly_report(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        user_id = payload.get('user_id')
+        try:
+            user_id = payload.get('user_id')
 
-        # Manager(s) list from env (comma-separated supported)
-        manager_ids = [m.strip() for m in (settings.slack_manager_user_id or "").split(',') if m.strip()]
+            # Manager(s) list from env (comma-separated supported)
+            manager_ids = [m.strip() for m in (settings.slack_manager_user_id or "").split(',') if m.strip()]
 
-        # If caller is manager, show full grouped report
-        if user_id in manager_ids:
-            grouped_entries = TimesheetService.get_monthly_entries_grouped_by_user(self.db)
-            channel_ids = TimesheetService.get_all_channels(self.db)
-            all_user_ids = set(self.slack_service.get_all_users_from_channels(channel_ids))
-            submitted_user_ids = set(grouped_entries.keys())
-            missing_user_ids = list(all_user_ids - submitted_user_ids)
+            # If caller is manager, generate full report with missing users
+            if user_id in manager_ids:
+                # Schedule background job to generate full report with missing users
+                self._schedule_full_monthly_report(user_id)
+                
+                return {
+                    "response_type": "ephemeral",
+                    "text": "📊 Generating detailed monthly report with missing users... You'll receive it via DM shortly."
+                }
 
-            blocks = self.block_builder.build_user_grouped_report_blocks(
-                grouped_entries,
-                "📊 Monthly Timesheet Report",
-                missing_user_ids
-            )
+            # Non-manager: show only the caller's monthly entries for last ~31 days
+            entries = TimesheetService.get_user_entries(self.db, user_id, days=31, timesheet_type='monthly')
+            entry_dicts = [
+                {
+                    'username': e.username,
+                    'client_name': e.client_name,
+                    'hours': e.hours,
+                    'submission_date': e.submission_date.strftime('%Y-%m-%d %H:%M')
+                }
+                for e in entries
+            ]
 
+            blocks = self.block_builder.build_report_blocks(entry_dicts, "📊 Your Monthly Timesheet Report")
             return {
                 "response_type": "ephemeral",
                 "blocks": blocks,
-                "text": "Monthly Report"
+                "text": "Your Monthly Report"
             }
-
-        # Non-manager: show only the caller's entries for last ~31 days
-        entries = TimesheetService.get_user_entries(self.db, user_id, days=31)
-        entry_dicts = [
-            {
-                'username': e.username,
-                'client_name': e.client_name,
-                'hours': e.hours,
-                'submission_date': e.submission_date.strftime('%Y-%m-%d %H:%M')
+        
+        except Exception as e:
+            logger.error(f"Error in handle_monthly_report: {str(e)}")
+            return {
+                "response_type": "ephemeral",
+                "text": f"Error generating monthly report: {str(e)}"
             }
-            for e in entries
-        ]
-
-        blocks = self.block_builder.build_report_blocks(entry_dicts, "📊 Your Monthly Timesheet Report")
-        return {
-            "response_type": "ephemeral",
-            "blocks": blocks,
-            "text": "Your Monthly Report"
-        }
 
     async def handle_edit_timesheet_command(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Handle the /edit_timesheet command."""
@@ -262,3 +272,134 @@ class CommandHandler:
                 "text": "Error: Unable to open edit form. Please try again."
             }
 
+    def _schedule_full_weekly_report(self, manager_user_id: str):
+        """Schedule a background job to generate full weekly report with missing users."""
+        try:
+            import threading
+            thread = threading.Thread(
+                target=self._generate_full_weekly_report_sync,
+                args=(manager_user_id,)
+            )
+            thread.daemon = True
+            thread.start()
+            
+            logger.info(f"Scheduled full weekly report generation for manager {manager_user_id}")
+            
+        except Exception as e:
+            logger.error(f"Error scheduling full weekly report: {str(e)}")
+
+    def _schedule_full_monthly_report(self, manager_user_id: str):
+        """Schedule a background job to generate full monthly report with missing users."""
+        try:
+            import threading
+            thread = threading.Thread(
+                target=self._generate_full_monthly_report_sync,
+                args=(manager_user_id,)
+            )
+            thread.daemon = True
+            thread.start()
+            
+            logger.info(f"Scheduled full monthly report generation for manager {manager_user_id}")
+            
+        except Exception as e:
+            logger.error(f"Error scheduling full monthly report: {str(e)}")
+
+    def _generate_full_weekly_report_sync(self, manager_user_id: str):
+        """Generate full weekly report with missing users and send via DM."""
+        try:
+            from app.database import SessionLocal
+            
+            db = SessionLocal()
+            
+            # Get grouped entries (fast database query)
+            grouped_entries = TimesheetService.get_weekly_entries_grouped_by_user(db)
+            logger.info(f"📊 Background Weekly Report: Found {len(grouped_entries)} users with submissions")
+            
+            # Get missing users (this is the slow part, but now it's in background)
+            channel_ids = TimesheetService.get_all_channels(db)
+            valid_channels = [ch for ch in channel_ids if ch != 'unknown']
+            
+            missing_user_ids = []
+            if valid_channels:
+                try:
+                    all_user_ids = set(self.slack_service.get_all_users_from_channels(valid_channels))
+                    submitted_user_ids = set(grouped_entries.keys())
+                    missing_user_ids = list(all_user_ids - submitted_user_ids)
+                    logger.info(f"📊 Background Weekly Report: Found {len(missing_user_ids)} missing users")
+                except Exception as e:
+                    logger.warning(f"Error getting missing users for background report: {str(e)}")
+                    missing_user_ids = []
+
+            # Build the full report blocks
+            blocks = self.block_builder.build_user_grouped_report_blocks(
+                grouped_entries,
+                "📊 Complete Weekly Timesheet Report",
+                missing_user_ids
+            )
+
+            # Send via DM to manager
+            success = self.slack_service.send_dm(
+                manager_user_id,
+                blocks,
+                "Complete Weekly Timesheet Report"
+            )
+            
+            if success:
+                logger.info(f"✅ Full weekly report sent to manager {manager_user_id}")
+            else:
+                logger.error(f"❌ Failed to send full weekly report to manager {manager_user_id}")
+            
+            db.close()
+            
+        except Exception as e:
+            logger.error(f"Error generating full weekly report: {str(e)}")
+
+    def _generate_full_monthly_report_sync(self, manager_user_id: str):
+        """Generate full monthly report with missing users and send via DM."""
+        try:
+            from app.database import SessionLocal
+            
+            db = SessionLocal()
+            
+            # Get grouped entries (fast database query)
+            grouped_entries = TimesheetService.get_monthly_entries_grouped_by_user(db)
+            logger.info(f"📊 Background Monthly Report: Found {len(grouped_entries)} users with submissions")
+            
+            # Get missing users (this is the slow part, but now it's in background)
+            channel_ids = TimesheetService.get_all_channels(db)
+            valid_channels = [ch for ch in channel_ids if ch != 'unknown']
+            
+            missing_user_ids = []
+            if valid_channels:
+                try:
+                    all_user_ids = set(self.slack_service.get_all_users_from_channels(valid_channels))
+                    submitted_user_ids = set(grouped_entries.keys())
+                    missing_user_ids = list(all_user_ids - submitted_user_ids)
+                    logger.info(f"📊 Background Monthly Report: Found {len(missing_user_ids)} missing users")
+                except Exception as e:
+                    logger.warning(f"Error getting missing users for background report: {str(e)}")
+                    missing_user_ids = []
+
+            # Build the full report blocks
+            blocks = self.block_builder.build_user_grouped_report_blocks(
+                grouped_entries,
+                "📊 Complete Monthly Timesheet Report",
+                missing_user_ids
+            )
+
+            # Send via DM to manager
+            success = self.slack_service.send_dm(
+                manager_user_id,
+                blocks,
+                "Complete Monthly Timesheet Report"
+            )
+            
+            if success:
+                logger.info(f"✅ Full monthly report sent to manager {manager_user_id}")
+            else:
+                logger.error(f"❌ Failed to send full monthly report to manager {manager_user_id}")
+            
+            db.close()
+            
+        except Exception as e:
+            logger.error(f"Error generating full monthly report: {str(e)}")
