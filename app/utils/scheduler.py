@@ -20,23 +20,23 @@ class TaskScheduler:
         self.slack_service = SlackService()
     
     def start(self):
-        # PRODUCTION: Weekly reminder every Friday at 11 PM
+        # PRODUCTION MODE: Weekly reminder Friday at 11 PM IST (17:30 UTC)
         self.scheduler.add_job(
             self.send_weekly_reminder,
-            CronTrigger(day_of_week='fri', hour=23, minute=0),  # PRODUCTION: Friday 11 PM
+            CronTrigger(day_of_week='fri', hour=17, minute=30),  # PRODUCTION: Friday 11 PM IST = Friday 17:30 UTC
             id='weekly_reminder'
         )
         
-        # Monthly reminder: Check daily at 11 PM if it's the last working day of month
+        # Monthly reminder: Check daily at 11 PM IST if it's the last working day of month
         # If month end is Saturday or Sunday, remind on the Friday before
         self.scheduler.add_job(
             self.check_and_send_monthly_reminder,
-            CronTrigger(hour=23, minute=0),  # Run daily at 11 PM
+            CronTrigger(hour=17, minute=30),  # Run daily at 11 PM IST (17:30 UTC)
             id='monthly_reminder_check'
         )
         
         self.scheduler.start()
-        logger.info("Scheduler started - PRODUCTION MODE: Weekly (Friday 11 PM) and monthly (last working day 11 PM) reminders")
+        logger.info("Scheduler started - PRODUCTION MODE: Weekly reminder Friday 11 PM IST (17:30 UTC) and monthly reminder on last working day at 11 PM IST")
     
     def stop(self):
         self.scheduler.shutdown()
@@ -73,9 +73,16 @@ class TaskScheduler:
         try:
             missing_users_per_channel = {}
             
-            # Get all channels
-            result = db.execute(text("SELECT DISTINCT channel_id FROM timesheet_entries WHERE channel_id != 'unknown'"))
-            channels = [row[0] for row in result]
+            # Get ALL channels where bot is a member (not just channels with submissions)
+            try:
+                channels = self.slack_service.get_bot_channels()
+                logger.info(f"Checking ALL bot channels for missing users: {channels}")
+            except Exception as e:
+                logger.error(f"Error getting bot channels for missing users: {str(e)}")
+                # Fallback to channels from database
+                result = db.execute(text("SELECT DISTINCT channel_id FROM timesheet_entries WHERE channel_id != 'unknown'"))
+                channels = [row[0] for row in result]
+                logger.info(f"Fallback - checking channels from DB: {channels}")
             
             for channel_id in channels:
                 try:
@@ -120,7 +127,9 @@ class TaskScheduler:
                 WHERE timesheet_type = 'weekly' AND submission_date >= :week_start
             """), {"week_start": week_start})
             
-            return [row[0] for row in result]
+            submitters = [row[0] for row in result]
+            logger.info(f"📊 Weekly submitters from DB: {submitters}")
+            return submitters
         except Exception as e:
             logger.error(f"Error getting weekly submitters: {str(e)}")
             return []
@@ -137,7 +146,9 @@ class TaskScheduler:
                 WHERE timesheet_type = 'monthly' AND submission_date >= :month_start
             """), {"month_start": month_start})
             
-            return [row[0] for row in result]
+            submitters = [row[0] for row in result]
+            logger.info(f"📊 Monthly submitters from DB: {submitters}")
+            return submitters
         except Exception as e:
             logger.error(f"Error getting monthly submitters: {str(e)}")
             return []
@@ -225,6 +236,17 @@ class TaskScheduler:
             channels = [row[0] for row in result]
             logger.info(f"Found {len(channels)} channels with timesheet history: {channels}")
             
+            # If no channels found in database (first time), get channels where bot is a member
+            if not channels:
+                logger.info("No channels found in database. Getting channels where bot is a member...")
+                try:
+                    bot_channels = self.slack_service.get_bot_channels()
+                    channels = bot_channels
+                    logger.info(f"Found {len(channels)} channels where bot is a member: {channels}")
+                except Exception as e:
+                    logger.error(f"Error getting bot channels: {str(e)}")
+                    channels = []
+            
             # Get all users from all channels (this is who should get reminders)
             all_user_ids = set()
             channel_user_counts = {}
@@ -286,7 +308,8 @@ class TaskScheduler:
                 DateTrigger(run_date=run_time),
                 args=['weekly'],
                 id=job_id,
-                replace_existing=False
+                replace_existing=False,
+                misfire_grace_time=600  # Allow job to run up to 10 minutes late
             )
             
             logger.info(f"⏰ Scheduled weekly follow-up job '{job_id}' to run at {run_time.strftime('%Y-%m-%d %H:%M:%S')} ({delay_seconds} seconds from now)")
@@ -311,6 +334,17 @@ class TaskScheduler:
             result = db.execute(text("SELECT DISTINCT channel_id FROM timesheet_entries WHERE channel_id != 'unknown'"))
             channels = [row[0] for row in result]
             logger.info(f"Found {len(channels)} channels with timesheet history: {channels}")
+            
+            # If no channels found in database (first time), get channels where bot is a member
+            if not channels:
+                logger.info("No channels found in database. Getting channels where bot is a member...")
+                try:
+                    bot_channels = self.slack_service.get_bot_channels()
+                    channels = bot_channels
+                    logger.info(f"Found {len(channels)} channels where bot is a member: {channels}")
+                except Exception as e:
+                    logger.error(f"Error getting bot channels: {str(e)}")
+                    channels = []
             
             # Get all users from all channels (this is who should get reminders)
             all_user_ids = set()
@@ -373,7 +407,8 @@ class TaskScheduler:
                 DateTrigger(run_date=run_time),
                 args=['monthly'],
                 id=job_id,
-                replace_existing=False
+                replace_existing=False,
+                misfire_grace_time=600  # Allow job to run up to 10 minutes late
             )
             
             logger.info(f"⏰ Scheduled monthly follow-up job '{job_id}' to run at {run_time.strftime('%Y-%m-%d %H:%M:%S')} ({delay_seconds} seconds from now)")

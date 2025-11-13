@@ -47,6 +47,29 @@ class SlackService:
             logger.error(f"Error getting channel members: {e.response['error']}")
             return []
     
+    def get_bot_channels(self) -> List[str]:
+        """Get all channels where the bot is a member."""
+        try:
+            response = self.client.conversations_list(
+                types="public_channel,private_channel",
+                exclude_archived=True
+            )
+            
+            bot_channels = []
+            for channel in response.get('channels', []):
+                channel_id = channel['id']
+                # Check if bot is a member of this channel
+                if channel.get('is_member', False):
+                    bot_channels.append(channel_id)
+                    logger.debug(f"Bot is member of channel: {channel_id} ({channel.get('name', 'unknown')})")
+            
+            logger.info(f"Found {len(bot_channels)} channels where bot is a member")
+            return bot_channels
+            
+        except SlackApiError as e:
+            logger.error(f"Error getting bot channels: {e.response['error']}")
+            return []
+    
     def get_user_info(self, user_id: str) -> Optional[Dict[str, Any]]:
         try:
             response = self.client.users_info(user=user_id)
@@ -167,15 +190,21 @@ class SlackService:
         for channel_id in channel_ids:
             try:
                 members = self.get_channel_members(channel_id)
+                logger.info(f"📊 Channel {channel_id} has {len(members)} total members")
                 # Filter out bots
+                channel_users = []
                 for member_id in members:
                     user_info = self.get_user_info(member_id)
                     if user_info and not user_info.get('is_bot', False) and not user_info.get('deleted', False):
                         all_user_ids.add(member_id)
+                        channel_users.append(member_id)
+                        logger.debug(f"📊 Added user {member_id} ({user_info.get('name', 'unknown')}) from channel {channel_id}")
+                logger.info(f"📊 Channel {channel_id} has {len(channel_users)} non-bot users: {channel_users}")
             except Exception as e:
                 logger.warning(f"Error getting members from channel {channel_id}: {str(e)}")
                 continue
         
+        logger.info(f"📊 Total unique users from all channels: {len(all_user_ids)} - {list(all_user_ids)}")
         return list(all_user_ids)
 
     def format_user_mention(self, user_id: str) -> str:
