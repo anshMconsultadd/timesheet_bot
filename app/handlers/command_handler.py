@@ -314,18 +314,29 @@ class CommandHandler:
             # Get grouped entries (fast database query)
             grouped_entries = TimesheetService.get_weekly_entries_grouped_by_user(db)
             logger.info(f"📊 Background Weekly Report: Found {len(grouped_entries)} users with submissions")
+            logger.info(f"📊 Submitted user_ids: {list(grouped_entries.keys())}")
             
-            # Get missing users (this is the slow part, but now it's in background)
-            channel_ids = TimesheetService.get_all_channels(db)
-            valid_channels = [ch for ch in channel_ids if ch != 'unknown']
+            # Get ALL channels where bot is a member (not just channels with submissions)
+            try:
+                valid_channels = self.slack_service.get_bot_channels()
+                logger.info(f"📊 Checking ALL bot channels: {valid_channels}")
+            except Exception as e:
+                logger.error(f"Error getting bot channels: {str(e)}")
+                # Fallback to channels from database
+                channel_ids = TimesheetService.get_all_channels(db)
+                valid_channels = [ch for ch in channel_ids if ch != 'unknown']
+                logger.info(f"📊 Fallback - checking channels from DB: {valid_channels}")
             
             missing_user_ids = []
             if valid_channels:
                 try:
                     all_user_ids = set(self.slack_service.get_all_users_from_channels(valid_channels))
+                    logger.info(f"📊 All user_ids from channels: {all_user_ids}")
                     submitted_user_ids = set(grouped_entries.keys())
+                    logger.info(f"📊 Submitted user_ids (set): {submitted_user_ids}")
                     missing_user_ids = list(all_user_ids - submitted_user_ids)
                     logger.info(f"📊 Background Weekly Report: Found {len(missing_user_ids)} missing users")
+                    logger.info(f"📊 Missing user_ids: {missing_user_ids}")
                 except Exception as e:
                     logger.warning(f"Error getting missing users for background report: {str(e)}")
                     missing_user_ids = []
@@ -364,18 +375,29 @@ class CommandHandler:
             # Get grouped entries (fast database query)
             grouped_entries = TimesheetService.get_monthly_entries_grouped_by_user(db)
             logger.info(f"📊 Background Monthly Report: Found {len(grouped_entries)} users with submissions")
+            logger.info(f"📊 Submitted user_ids: {list(grouped_entries.keys())}")
             
-            # Get missing users (this is the slow part, but now it's in background)
-            channel_ids = TimesheetService.get_all_channels(db)
-            valid_channels = [ch for ch in channel_ids if ch != 'unknown']
+            # Get ALL channels where bot is a member (not just channels with submissions)
+            try:
+                valid_channels = self.slack_service.get_bot_channels()
+                logger.info(f"📊 Checking ALL bot channels: {valid_channels}")
+            except Exception as e:
+                logger.error(f"Error getting bot channels: {str(e)}")
+                # Fallback to channels from database
+                channel_ids = TimesheetService.get_all_channels(db)
+                valid_channels = [ch for ch in channel_ids if ch != 'unknown']
+                logger.info(f"📊 Fallback - checking channels from DB: {valid_channels}")
             
             missing_user_ids = []
             if valid_channels:
                 try:
                     all_user_ids = set(self.slack_service.get_all_users_from_channels(valid_channels))
+                    logger.info(f"📊 All user_ids from channels: {all_user_ids}")
                     submitted_user_ids = set(grouped_entries.keys())
+                    logger.info(f"📊 Submitted user_ids (set): {submitted_user_ids}")
                     missing_user_ids = list(all_user_ids - submitted_user_ids)
                     logger.info(f"📊 Background Monthly Report: Found {len(missing_user_ids)} missing users")
+                    logger.info(f"📊 Missing user_ids: {missing_user_ids}")
                 except Exception as e:
                     logger.warning(f"Error getting missing users for background report: {str(e)}")
                     missing_user_ids = []
