@@ -334,7 +334,14 @@ class CommandHandler:
                     logger.info(f"📊 All user_ids from channels: {all_user_ids}")
                     submitted_user_ids = set(grouped_entries.keys())
                     logger.info(f"📊 Submitted user_ids (set): {submitted_user_ids}")
-                    missing_user_ids = list(all_user_ids - submitted_user_ids)
+                    
+                    # Filter out excluded users (who don't need to fill timesheets)
+                    excluded_users = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+                    excluded_user_ids_set = set(excluded_users)
+                    if excluded_users:
+                        logger.info(f"📊 Excluded users (won't appear in missing list): {excluded_users}")
+                    
+                    missing_user_ids = list(all_user_ids - submitted_user_ids - excluded_user_ids_set)
                     logger.info(f"📊 Background Weekly Report: Found {len(missing_user_ids)} missing users")
                     logger.info(f"📊 Missing user_ids: {missing_user_ids}")
                 except Exception as e:
@@ -395,7 +402,14 @@ class CommandHandler:
                     logger.info(f"📊 All user_ids from channels: {all_user_ids}")
                     submitted_user_ids = set(grouped_entries.keys())
                     logger.info(f"📊 Submitted user_ids (set): {submitted_user_ids}")
-                    missing_user_ids = list(all_user_ids - submitted_user_ids)
+                    
+                    # Filter out excluded users (who don't need to fill timesheets)
+                    excluded_users = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+                    excluded_user_ids_set = set(excluded_users)
+                    if excluded_users:
+                        logger.info(f"📊 Excluded users (won't appear in missing list): {excluded_users}")
+                    
+                    missing_user_ids = list(all_user_ids - submitted_user_ids - excluded_user_ids_set)
                     logger.info(f"📊 Background Monthly Report: Found {len(missing_user_ids)} missing users")
                     logger.info(f"📊 Missing user_ids: {missing_user_ids}")
                 except Exception as e:

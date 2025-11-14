@@ -98,12 +98,15 @@ class TaskScheduler:
                     else:
                         submitted_users = self._get_monthly_submitters(db)
                     
-                    # Calculate missing users
-                    missing = [uid for uid in all_users if uid not in submitted_users]
+                    # Filter out excluded users (who don't need to fill timesheets)
+                    excluded_users = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+                    
+                    # Calculate missing users (excluding both submitted users and excluded users)
+                    missing = [uid for uid in all_users if uid not in submitted_users and uid not in excluded_users]
                     
                     if missing:
                         missing_users_per_channel[channel_id] = missing
-                        logger.info(f"Channel {channel_id}: {len(missing)} missing users for {timesheet_type} timesheet")
+                        logger.info(f"Channel {channel_id}: {len(missing)} missing users for {timesheet_type} timesheet (excluded {len(excluded_users)} users)")
                 
                 except Exception as e:
                     logger.warning(f"Error processing channel {channel_id}: {str(e)}")
@@ -261,6 +264,12 @@ class TaskScheduler:
                     logger.warning(f"Error getting users from channel {channel_id}: {str(e)}")
                     continue
             
+            # Filter out excluded users (who don't need to fill timesheets)
+            excluded_users = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+            if excluded_users:
+                logger.info(f"Excluded users (won't receive reminders): {excluded_users}")
+                all_user_ids = all_user_ids - set(excluded_users)
+            
             logger.info(f"Total unique users to notify: {len(all_user_ids)}")
             logger.info(f"Channel user breakdown: {channel_user_counts}")
             
@@ -359,6 +368,12 @@ class TaskScheduler:
                 except Exception as e:
                     logger.warning(f"Error getting users from channel {channel_id}: {str(e)}")
                     continue
+            
+            # Filter out excluded users (who don't need to fill timesheets)
+            excluded_users = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+            if excluded_users:
+                logger.info(f"Excluded users (won't receive reminders): {excluded_users}")
+                all_user_ids = all_user_ids - set(excluded_users)
             
             logger.info(f"Total unique users to notify: {len(all_user_ids)}")
             logger.info(f"Channel user breakdown: {channel_user_counts}")
