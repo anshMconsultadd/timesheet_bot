@@ -50,24 +50,64 @@ class SlackService:
     def get_bot_channels(self) -> List[str]:
         """Get all channels where the bot is a member."""
         try:
-            response = self.client.conversations_list(
-                types="public_channel,private_channel",
-                exclude_archived=True
-            )
-            
+            # Use team_id parameter and handle pagination
             bot_channels = []
-            for channel in response.get('channels', []):
-                channel_id = channel['id']
-                # Check if bot is a member of this channel
-                if channel.get('is_member', False):
-                    bot_channels.append(channel_id)
-                    logger.debug(f"Bot is member of channel: {channel_id} ({channel.get('name', 'unknown')})")
+            cursor = None
+            
+            while True:
+                params = {
+                    "types": "public_channel,private_channel",
+                    "exclude_archived": True,
+                    "limit": 200
+                }
+                if cursor:
+                    params["cursor"] = cursor
+                
+                response = self.client.conversations_list(**params)
+                
+                channels = response.get('channels', [])
+                logger.info(f"conversations.list API: fetched {len(channels)} channels (cursor: {cursor is not None})")
+                
+                for channel in channels:
+                    channel_id = channel['id']
+                    channel_name = channel.get('name', 'unknown')
+                    is_member = channel.get('is_member', False)
+                    
+                    logger.debug(f"Channel {channel_id} ({channel_name}): is_member={is_member}")
+                    
+                    # Check if bot is a member of this channel
+                    if is_member:
+                        bot_channels.append(channel_id)
+                        logger.info(f"✅ Bot is member of channel: {channel_id} ({channel_name})")
+                
+                # Check if there are more pages
+                cursor = response.get('response_metadata', {}).get('next_cursor')
+                if not cursor:
+                    break
             
             logger.info(f"Found {len(bot_channels)} channels where bot is a member")
+            
+            # If still no channels found, try using conversations.list with team_id
+            if len(bot_channels) == 0:
+                logger.warning("No channels found with is_member=True. Trying alternative method...")
+                # Try getting user's conversations instead
+                try:
+                    user_response = self.client.users_conversations(
+                        types="public_channel,private_channel",
+                        exclude_archived=True,
+                        limit=200
+                    )
+                    alt_channels = [ch['id'] for ch in user_response.get('channels', [])]
+                    logger.info(f"Alternative method found {len(alt_channels)} channels: {alt_channels}")
+                    return alt_channels
+                except Exception as e:
+                    logger.error(f"Alternative method also failed: {str(e)}")
+            
             return bot_channels
             
         except SlackApiError as e:
             logger.error(f"Error getting bot channels: {e.response['error']}")
+            logger.error(f"Full error response: {e.response}")
             return []
     
     def get_user_info(self, user_id: str) -> Optional[Dict[str, Any]]:
