@@ -1,27 +1,28 @@
 #!/bin/bash
 
-# Timesheet Database Query Script
-# This script connects to the PostgreSQL database and shows timesheet entries
+# Script to check timesheet database status
 
-echo "🔍 Connecting to timesheet database..."
-echo "================================================"
+echo "=== Checking Timesheet Database ==="
+echo ""
 
-# Execute the database query
-docker exec -it timesheet_db psql -U postgres -d timesheet_db -c "
-SELECT 
-    id,
-    user_id,
-    username,
-    channel_id,
-    client_name,
-    hours,
-    timesheet_type,
-    submission_date,
-    created_at
-FROM timesheet_entries 
-ORDER BY created_at DESC;
-"
+echo "1️⃣ Channels in database:"
+docker exec -it timesheet_db psql -U postgres -d timesheet_db -c \
+  "SELECT DISTINCT channel_id, COUNT(*) as count FROM timesheet_entries GROUP BY channel_id;"
 
 echo ""
-echo "================================================"
-echo "✅ Database query completed!"
+echo "2️⃣ Users in database:"
+docker exec -it timesheet_db psql -U postgres -d timesheet_db -c \
+  "SELECT DISTINCT user_id, username, COUNT(*) as count FROM timesheet_entries GROUP BY user_id, username;"
+
+echo ""
+echo "3️⃣ Recent entries:"
+docker exec -it timesheet_db psql -U postgres -d timesheet_db -c \
+  "SELECT id, user_id, username, channel_id, client_name, hours, timesheet_type, submission_date FROM timesheet_entries ORDER BY id DESC LIMIT 10;"
+
+echo ""
+echo "4️⃣ Total entries by type:"
+docker exec -it timesheet_db psql -U postgres -d timesheet_db -c \
+  "SELECT timesheet_type, COUNT(*) FROM timesheet_entries GROUP BY timesheet_type;"
+
+echo ""
+echo "✅ Database check complete"
