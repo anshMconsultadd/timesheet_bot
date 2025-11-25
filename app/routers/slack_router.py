@@ -226,3 +226,43 @@ async def handle_edit_timesheet(request: Request, db: Session = Depends(get_db))
     response = await handler.handle_edit_timesheet_command(payload)
     
     return JSONResponse(content=response)
+
+@router.post("/commands/exemptUser")
+async def handle_exempt_user(request: Request, db: Session = Depends(get_db)):
+    """Handle the /exemptUser command - Manager only."""
+    body = await request.body()
+    
+    if not verify_slack_signature(request, body):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+    
+    form_data = await request.form()
+    
+    payload = {
+        "user_id": form_data.get("user_id"),
+        "text": form_data.get("text", "")
+    }
+    
+    handler = CommandHandler(db)
+    response = await handler.handle_exempt_user_command(payload)
+    
+    return JSONResponse(content=response)
+
+@router.post("/commands/removeExemption")
+async def handle_remove_exemption(request: Request, db: Session = Depends(get_db)):
+    """Handle the /removeExemption command - Manager only."""
+    body = await request.body()
+    
+    if not verify_slack_signature(request, body):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+    
+    form_data = await request.form()
+    
+    payload = {
+        "user_id": form_data.get("user_id"),
+        "text": form_data.get("text", "")
+    }
+    
+    handler = CommandHandler(db)
+    response = await handler.handle_remove_exemption_command(payload)
+    
+    return JSONResponse(content=response)

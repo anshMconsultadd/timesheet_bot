@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.services.slack_service import SlackService
 from app.services.timesheet_service import TimesheetService
+from app.services.exemption_service import get_all_exempted_users
 from app.utils.block_builder import BlockBuilder
 from app.config import get_settings
 from typing import Dict, Any, List
@@ -192,6 +193,102 @@ class CommandHandler:
                 "text": f"Error generating monthly report: {str(e)}"
             }
 
+    async def handle_exempt_user_command(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle the /exemptUser command - Manager only."""
+        user_id = payload.get('user_id')
+        text = payload.get('text', '').strip()
+        
+        # Check if user is a manager
+        manager_ids = [m.strip() for m in (settings.slack_manager_user_id or "").split(',') if m.strip()]
+        if user_id not in manager_ids:
+            return {
+                "response_type": "ephemeral",
+                "text": "❌ Only managers can exempt users from timesheet requirements."
+            }
+        
+        # Parse user mention from text (format: <@U123456|username> or <@U123456>)
+        if not text or not text.startswith('<@'):
+            return {
+                "response_type": "ephemeral",
+                "text": "❌ Please mention a user to exempt.\nUsage: `/exemptUser @username`"
+            }
+        
+        # Extract user ID from mention
+        import re
+        match = re.search(r'<@([A-Z0-9]+)', text)
+        if not match:
+            return {
+                "response_type": "ephemeral",
+                "text": "❌ Invalid user mention. Please use @username format."
+            }
+        
+        exempt_user_id = match.group(1)
+        
+        # Get username for logging
+        user_info = self.slack_service.get_user_info(exempt_user_id)
+        username = user_info.get('profile', {}).get('real_name', 'Unknown') if user_info else 'Unknown'
+        
+        # Add to exemption list
+        from app.services.exemption_service import add_exempted_user
+        success = add_exempted_user(exempt_user_id, username)
+        
+        if success:
+            return {
+                "response_type": "ephemeral",
+                "text": f"✅ User <@{exempt_user_id}> has been exempted from timesheet requirements."
+            }
+        else:
+            return {
+                "response_type": "ephemeral",
+                "text": f"⚠️ User <@{exempt_user_id}> is already exempted."
+            }
+    
+    async def handle_remove_exemption_command(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle the /removeExemption command - Manager only."""
+        user_id = payload.get('user_id')
+        text = payload.get('text', '').strip()
+        
+        # Check if user is a manager
+        manager_ids = [m.strip() for m in (settings.slack_manager_user_id or "").split(',') if m.strip()]
+        if user_id not in manager_ids:
+            return {
+                "response_type": "ephemeral",
+                "text": "❌ Only managers can remove user exemptions."
+            }
+        
+        # Parse user mention from text
+        if not text or not text.startswith('<@'):
+            return {
+                "response_type": "ephemeral",
+                "text": "❌ Please mention a user to remove exemption.\nUsage: `/removeExemption @username`"
+            }
+        
+        # Extract user ID from mention
+        import re
+        match = re.search(r'<@([A-Z0-9]+)', text)
+        if not match:
+            return {
+                "response_type": "ephemeral",
+                "text": "❌ Invalid user mention. Please use @username format."
+            }
+        
+        exempt_user_id = match.group(1)
+        
+        # Remove from exemption list
+        from app.services.exemption_service import remove_exempted_user
+        success = remove_exempted_user(exempt_user_id)
+        
+        if success:
+            return {
+                "response_type": "ephemeral",
+                "text": f"✅ User <@{exempt_user_id}> exemption has been removed. They will now receive timesheet reminders."
+            }
+        else:
+            return {
+                "response_type": "ephemeral",
+                "text": f"⚠️ User <@{exempt_user_id}> is not in the exemption list."
+            }
+
     async def handle_edit_timesheet_command(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Handle the /edit_timesheet command."""
         user_id = payload.get('user_id')
@@ -336,7 +433,9 @@ class CommandHandler:
                     logger.info(f"📊 Submitted user_ids (set): {submitted_user_ids}")
                     
                     # Filter out excluded users (who don't need to fill timesheets)
-                    excluded_users = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+                    # Combine users from .env and JSON file
+                    env_excluded = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+                    excluded_users = get_all_exempted_users(env_excluded)
                     excluded_user_ids_set = set(excluded_users)
                     if excluded_users:
                         logger.info(f"📊 Excluded users (won't appear in missing list): {excluded_users}")
@@ -404,7 +503,9 @@ class CommandHandler:
                     logger.info(f"📊 Submitted user_ids (set): {submitted_user_ids}")
                     
                     # Filter out excluded users (who don't need to fill timesheets)
-                    excluded_users = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+                    # Combine users from .env and JSON file
+                    env_excluded = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+                    excluded_users = get_all_exempted_users(env_excluded)
                     excluded_user_ids_set = set(excluded_users)
                     if excluded_users:
                         logger.info(f"📊 Excluded users (won't appear in missing list): {excluded_users}")

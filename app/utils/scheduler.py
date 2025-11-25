@@ -3,6 +3,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from app.services.slack_service import SlackService
 from app.services.timesheet_service import TimesheetService
+from app.services.exemption_service import get_all_exempted_users
 from app.database import SessionLocal
 from app.config import get_settings
 from sqlalchemy import text
@@ -20,12 +21,21 @@ class TaskScheduler:
         self.slack_service = SlackService()
     
     def start(self):
-        # PRODUCTION MODE: Weekly reminder Friday at 11 PM IST (17:30 UTC)
+        # PRODUCTION MODE: Weekly reminder every Friday at 11 PM IST (17:30 UTC)
         self.scheduler.add_job(
             self.send_weekly_reminder,
             CronTrigger(day_of_week='fri', hour=17, minute=30),  # PRODUCTION: Friday 11 PM IST = Friday 17:30 UTC
             id='weekly_reminder'
         )
+        
+        # TEST MODE: Uncomment below to test weekly reminder 5 minutes after startup
+        # from datetime import datetime, timedelta
+        # test_time = datetime.now() + timedelta(minutes=5)
+        # self.scheduler.add_job(
+        #     self.send_weekly_reminder,
+        #     DateTrigger(run_date=test_time),  # TEST: Run in 5 minutes
+        #     id='weekly_reminder'
+        # )
         
         # Monthly reminder: Check daily at 11 PM IST if it's the last working day of month
         # If month end is Saturday or Sunday, remind on the Friday before
@@ -36,7 +46,7 @@ class TaskScheduler:
         )
         
         self.scheduler.start()
-        logger.info("Scheduler started - PRODUCTION MODE: Weekly reminder Friday 11 PM IST (17:30 UTC) and monthly reminder on last working day at 11 PM IST")
+        logger.info("Scheduler started - PRODUCTION MODE: Weekly reminder every Friday at 11 PM IST and monthly reminder on last working day at 11 PM IST")
     
     def stop(self):
         self.scheduler.shutdown()
@@ -99,7 +109,9 @@ class TaskScheduler:
                         submitted_users = self._get_monthly_submitters(db)
                     
                     # Filter out excluded users (who don't need to fill timesheets)
-                    excluded_users = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+                    # Combine users from .env and JSON file
+                    env_excluded = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+                    excluded_users = get_all_exempted_users(env_excluded)
                     
                     # Calculate missing users (excluding both submitted users and excluded users)
                     missing = [uid for uid in all_users if uid not in submitted_users and uid not in excluded_users]
@@ -265,7 +277,9 @@ class TaskScheduler:
                     continue
             
             # Filter out excluded users (who don't need to fill timesheets)
-            excluded_users = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+            # Combine users from .env and JSON file
+            env_excluded = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+            excluded_users = get_all_exempted_users(env_excluded)
             if excluded_users:
                 logger.info(f"Excluded users (won't receive reminders): {excluded_users}")
                 all_user_ids = all_user_ids - set(excluded_users)
@@ -370,7 +384,9 @@ class TaskScheduler:
                     continue
             
             # Filter out excluded users (who don't need to fill timesheets)
-            excluded_users = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+            # Combine users from .env and JSON file
+            env_excluded = [u.strip() for u in (settings.excluded_user_ids or "").split(',') if u.strip()]
+            excluded_users = get_all_exempted_users(env_excluded)
             if excluded_users:
                 logger.info(f"Excluded users (won't receive reminders): {excluded_users}")
                 all_user_ids = all_user_ids - set(excluded_users)
