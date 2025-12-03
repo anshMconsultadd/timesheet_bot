@@ -198,6 +198,12 @@ class CommandHandler:
         user_id = payload.get('user_id')
         text = payload.get('text', '').strip()
         
+        # Debug logging
+        logger.info(f"🔍 handle_exempt_user_command - user_id: {user_id}")
+        logger.info(f"🔍 handle_exempt_user_command - text: '{text}'")
+        logger.info(f"🔍 handle_exempt_user_command - text length: {len(text)}")
+        logger.info(f"🔍 handle_exempt_user_command - text repr: {repr(text)}")
+        
         # Check if user is a manager
         manager_ids = [m.strip() for m in (settings.slack_manager_user_id or "").split(',') if m.strip()]
         if user_id not in manager_ids:
@@ -207,22 +213,32 @@ class CommandHandler:
             }
         
         # Parse user mention from text (format: <@U123456|username> or <@U123456>)
-        if not text or not text.startswith('<@'):
+        if not text:
+            logger.warning(f"🔍 Empty text received for exemptUser command")
             return {
                 "response_type": "ephemeral",
                 "text": "❌ Please mention a user to exempt.\nUsage: `/exemptUser @username`"
+            }
+        
+        if not text.startswith('<@'):
+            logger.warning(f"🔍 Text doesn't start with '<@': '{text}'")
+            return {
+                "response_type": "ephemeral",
+                "text": f"❌ Please mention a user to exempt.\nUsage: `/exemptUser @username`\n\nReceived: `{text}`"
             }
         
         # Extract user ID from mention
         import re
         match = re.search(r'<@([A-Z0-9]+)', text)
         if not match:
+            logger.warning(f"🔍 Regex didn't match user ID in: '{text}'")
             return {
                 "response_type": "ephemeral",
-                "text": "❌ Invalid user mention. Please use @username format."
+                "text": f"❌ Invalid user mention. Please use @username format.\n\nReceived: `{text}`"
             }
         
         exempt_user_id = match.group(1)
+        logger.info(f"🔍 Extracted user_id: {exempt_user_id}")
         
         # Get username for logging
         user_info = self.slack_service.get_user_info(exempt_user_id)
@@ -248,6 +264,12 @@ class CommandHandler:
         user_id = payload.get('user_id')
         text = payload.get('text', '').strip()
         
+        # Debug logging
+        logger.info(f"🔍 handle_remove_exemption_command - user_id: {user_id}")
+        logger.info(f"🔍 handle_remove_exemption_command - text: '{text}'")
+        logger.info(f"🔍 handle_remove_exemption_command - text length: {len(text)}")
+        logger.info(f"🔍 handle_remove_exemption_command - text repr: {repr(text)}")
+        
         # Check if user is a manager
         manager_ids = [m.strip() for m in (settings.slack_manager_user_id or "").split(',') if m.strip()]
         if user_id not in manager_ids:
@@ -257,22 +279,32 @@ class CommandHandler:
             }
         
         # Parse user mention from text
-        if not text or not text.startswith('<@'):
+        if not text:
+            logger.warning(f"🔍 Empty text received for removeExemption command")
             return {
                 "response_type": "ephemeral",
                 "text": "❌ Please mention a user to remove exemption.\nUsage: `/removeExemption @username`"
+            }
+        
+        if not text.startswith('<@'):
+            logger.warning(f"🔍 Text doesn't start with '<@': '{text}'")
+            return {
+                "response_type": "ephemeral",
+                "text": f"❌ Please mention a user to remove exemption.\nUsage: `/removeExemption @username`\n\nReceived: `{text}`"
             }
         
         # Extract user ID from mention
         import re
         match = re.search(r'<@([A-Z0-9]+)', text)
         if not match:
+            logger.warning(f"🔍 Regex didn't match user ID in: '{text}'")
             return {
                 "response_type": "ephemeral",
-                "text": "❌ Invalid user mention. Please use @username format."
+                "text": f"❌ Invalid user mention. Please use @username format.\n\nReceived: `{text}`"
             }
         
         exempt_user_id = match.group(1)
+        logger.info(f"🔍 Extracted user_id: {exempt_user_id}")
         
         # Remove from exemption list
         from app.services.exemption_service import remove_exempted_user

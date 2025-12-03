@@ -228,6 +228,7 @@ async def handle_edit_timesheet(request: Request, db: Session = Depends(get_db))
     return JSONResponse(content=response)
 
 @router.post("/commands/exemptUser")
+@router.post("/commands/exemptuser")  # Lowercase alias for Slack
 async def handle_exempt_user(request: Request, db: Session = Depends(get_db)):
     """Handle the /exemptUser command - Manager only."""
     body = await request.body()
@@ -236,6 +237,18 @@ async def handle_exempt_user(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Invalid signature")
     
     form_data = await request.form()
+    
+    # AGGRESSIVE DEBUG LOGGING
+    print("=" * 80)
+    print("EXEMPT USER COMMAND RECEIVED")
+    print(f"Full form_data dict: {dict(form_data)}")
+    print(f"Text field value: '{form_data.get('text', '')}'")
+    print(f"Text field repr: {repr(form_data.get('text', ''))}")
+    print(f"All form keys: {list(form_data.keys())}")
+    print("=" * 80)
+    
+    logger.info(f"🔍 exemptUser - form_data: {dict(form_data)}")
+    logger.info(f"🔍 exemptUser - text: '{form_data.get('text', '')}'")
     
     payload = {
         "user_id": form_data.get("user_id"),
@@ -248,6 +261,7 @@ async def handle_exempt_user(request: Request, db: Session = Depends(get_db)):
     return JSONResponse(content=response)
 
 @router.post("/commands/removeExemption")
+@router.post("/commands/removeexemption")  # Lowercase alias for Slack
 async def handle_remove_exemption(request: Request, db: Session = Depends(get_db)):
     """Handle the /removeExemption command - Manager only."""
     body = await request.body()
@@ -256,6 +270,18 @@ async def handle_remove_exemption(request: Request, db: Session = Depends(get_db
         raise HTTPException(status_code=403, detail="Invalid signature")
     
     form_data = await request.form()
+    
+    # AGGRESSIVE DEBUG LOGGING
+    print("=" * 80)
+    print("REMOVE EXEMPTION COMMAND RECEIVED")
+    print(f"Full form_data dict: {dict(form_data)}")
+    print(f"Text field value: '{form_data.get('text', '')}'")
+    print(f"Text field repr: {repr(form_data.get('text', ''))}")
+    print(f"All form keys: {list(form_data.keys())}")
+    print("=" * 80)
+    
+    logger.info(f"🔍 removeExemption - form_data: {dict(form_data)}")
+    logger.info(f"🔍 removeExemption - text: '{form_data.get('text', '')}'")
     
     payload = {
         "user_id": form_data.get("user_id"),
