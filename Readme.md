@@ -1,10 +1,25 @@
-TimesheetBot
-The Slack Timesheet Bot automates timesheet submissions and reporting directly within Slack.
-The Slack Timesheet Bot is an internal automation tool that simplifies timesheet management directly within Slack.
-It allows employees to fill, view, and submit their timesheets without leaving the Slack workspace, helping teams stay consistent with project reporting and saving time on manual entries.
-it helps users post their weekly and monthly work summaries, while managers can easily fetch detailed reports — all from simple slash commands.
-    •    /posttimesheetweekly – Log your weekly hours and activities directly from Slack.
-    •    /posttimesheetmonthly – Submit your complete monthly work summary.
-    •    /gettimesheetweeklyreport – Instantly retrieve a team-wide weekly report for quick review.
-    •    /gettimesheetmonthlyreport – Generate and view monthly analytics.
-    •    /edit_timesheet – Let's you edit your last filled timesheet. 
+# TimesheetBot
+
+**TimesheetBot** is a Slack-based automation tool designed to streamline timesheet submissions and reporting within your Slack workspace.
+
+This internal bot makes timesheet management simple and efficient by allowing employees to log, view, edit, and submit their timesheets without ever leaving Slack. By reducing manual effort, it helps teams maintain consistent project reporting while saving valuable time.
+
+Users can easily post their weekly and monthly work summaries, and managers can quickly access detailed reports — all through intuitive slash commands.
+
+## Available Commands
+
+- **/posttimesheetweekly**  
+  Submit your weekly hours and activity summary directly from Slack.
+
+- **/posttimesheetmonthly**  
+  Log and submit your complete monthly work summary.
+
+- **/gettimesheetweeklyreport**  
+  Instantly fetch a team-wide weekly report for review.
+
+- **/gettimesheetmonthlyreport**  
+  Generate and view detailed monthly reports and analytics.
+
+- **/edit_timesheet**  
+  Edit your most recently submitted timesheet.
+![Alt text](image_bot.png)
